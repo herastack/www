@@ -1,0 +1,148 @@
+# Protocol
+
+`hera::protocol` defines the wire types and transport helpers that connect
+clients to the Hera server. It is a compact, versioned binary protocol with
+FD passing support for DMA-BUFs and other shared buffers.
+
+## Transport And Framing
+
+The default transport is a Unix domain **seqpacket** socket. On Linux, the
+protocol uses ancillary data to pass file descriptors alongside binary payloads.
+On macOS, the transport falls back to a length-prefixed stream.
+
+Key points:
+
+- Default maximum message size: 4 MiB (`DEFAULT_MAX_MESSAGE_SIZE`).
+- Up to 8 file descriptors can be attached to a single message.
+- Messages are encoded with the protocol codec (`BincodeCodec`).
+
+## Handshake And Versioning
+
+Connections start with a Hello exchange:
+
+- `ClientHello { protocol_version, client_name }`
+- `ServerHello { protocol_version, server_name, client_id }`
+
+`ClientHello::PROTOCOL_VERSION` and `ServerHello::PROTOCOL_VERSION` must match.
+
+## Typical Client Message Flow
+
+1. `ClientHello` → `ServerHello`
+2. `CreateSurface` → `SurfaceCreated`
+3. `Commit { diff_ops }` → `CommitAck`
+4. → `FrameScheduled` / `FramePresented`
+5. `DestroySurface`
+
+## Core Message Types
+
+### Client → Server
+
+- `CreateSurface { name }` and `DestroySurface { surface }`
+- `RequestInput { surface }` and `GrantInputFocus { surface }`
+- `Commit { surface, commit_id, diff_ops }`
+- `ImportBuffer { buffer_id, width, height, stride, format, buffer_type, modifier }`
+
+### Server → Client
+
+- `SurfaceCreated { surface }`, `SurfaceChanged`, `SurfaceDestroyed`
+- `SurfaceAnnounced { surface, owner, name }`
+- `SurfaceRequestedInput { surface }`
+- `FrameScheduled { frame, present_estimate_micros, deadline_micros }`
+- `FramePresented { frame, present_time_micros }`
+- `CommitAck { surface, commit_id }`
+- `InputEvent { surface, node, event }`
+- `Error { code, message }`
+
+## Scene Graph Diffs
+
+Clients update the scene graph via `DiffOp` entries:
+
+- `SetRoot { node }` replaces the root node for a surface.
+- `AddNode { parent, index, node }` inserts a child node.
+- `RemoveNode { node }` deletes a node and its subtree.
+- `UpdateNode { node, properties, kind, kind_patch }` patches properties or kind.
+- `Reorder { parent, children }` reorders all children under a parent.
+
+Nodes are described with `NodeDescriptor { node_id, kind, properties }`.
+
+## Commit Semantics
+
+`Commit` is the atomic unit of change. Clients choose the `commit_id` so they
+can match `CommitAck` responses to in-flight updates and retire buffers or
+local state when the server has applied a change.
+
+## Node Kinds
+
+`NodeKind` is a small set of render primitives:
+
+- `View { color, radius, border }`
+- `Image { buffer, width, height, color }`
+- `TextRun { glyphs, color, font_key, size }`
+- `SurfaceView { surface }`
+
+Text runs carry client-shaped glyphs (`GlyphInstance`) with glyph ID, advance,
+and offset, allowing the server to cache and render text efficiently.
+
+## Node Properties And Patches
+
+Every node has `NodeProperties`, including:
+
+- `frame`, `position`, and `z_position`
+- `opacity`, `transform`, `rotation`, `scale`, `offset`
+- `clip`, `shadow`, `blur`, `filter`, `mask`
+- `visible` and `hit`
+
+Updates use `NodePropertiesPatch`, where fields are optional and can be either
+direct sets or `Animatable` values for interpolation on the server.
+
+`NodeKindPatch` exists for view-specific patches when you need to update
+view metadata without replacing the entire kind.
+
+## Animation
+
+Animations are expressed as `Animatable<T>`:
+
+- `Animatable::Set(value)` applies immediately.
+- `Animatable::Interpolation { to, interp }` interpolates using
+  `Interpolation` (`Easing`, duration, repeat, etc.).
+
+Hera Kit can set a default interpolation for diffs so property updates animate
+without extra wiring.
+
+## Buffers And Images
+
+Images can either reference shared buffers or be solid-colored:
+
+- `ImportBuffer` registers a buffer ID with width/height/stride and format.
+- `BufferType` supports `DmaBuf` and `CpuMemory`.
+- `BufferFormat` includes `Rgba8888`, `Bgra8888`, and `Nv12`.
+- `Image { buffer, width, height, color }` references a buffer by ID.
+
+When using DMA-BUFs, the file descriptor is passed alongside the import
+message, keeping the transfer zero-copy.
+
+## Surface Sizing
+
+The server notifies clients of size changes via `SurfaceChanged { width, height }`.
+Clients should treat this as the new root constraint when generating layout.
+
+## Input Events
+
+`InputEvent` includes a timestamp and one of:
+
+- `PointerEvent` (motion, button, scroll)
+- `KeyboardEvent`
+- `TouchEvent`
+
+Events are delivered as `ServerToClient::InputEvent` and include an optional
+`node` ID from server-side hit-testing.
+
+## Error Handling
+
+Errors are returned as `ServerToClient::Error { code, message }` with codes such
+as `InvalidSurface`, `InvalidNode`, or `ProtocolViolation`.
+
+## Next Steps
+
+See the architecture overview for how protocol messages flow through the
+compositor, or the Hera Kit docs to learn how a view tree becomes `DiffOp`s.

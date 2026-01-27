@@ -1,0 +1,117 @@
+# Layout
+
+Hera Kit ships a minimal, constraint-based layout system built on the same
+AttributeGraph runtime as state. Layout is deterministic, cheap to evaluate,
+and designed to produce stable `frame` and `position` values that the
+compositor can animate or diff efficiently.
+
+## Layout Pipeline
+
+Every `App::render(...)` run follows the same steps:
+
+1. Build a new `UiNode` tree from your `View`.
+2. `LayoutSystem::sync_tree` creates or reuses layout nodes for every UI node.
+3. `write_intrinsics` writes each node's intrinsic size into the layout graph.
+4. Root constraints are set to the surface size (or custom constraints).
+5. Derived layout attributes compute child sizes and positions.
+6. `apply_layout` writes computed `frame` and `position` back onto the tree.
+
+The output `UiNode` tree is then diffed into `DiffOp`s.
+
+## Intrinsic Size
+
+Layout uses the `frame` on each node as its intrinsic size:
+
+- `rectangle(...).frame(w, h)` sets a fixed intrinsic size.
+- `Text` nodes set their `frame` based on shaped text size.
+- `image(...)` should call `.image_size(...)` and typically `.frame(...)` to
+  declare its intrinsic bounds.
+
+If you omit `frame`, the intrinsic size defaults to zero, which is useful for
+spacers or invisible containers but not for visible content.
+
+## Constraints
+
+Constraints are simple min/max bounds:
+
+- `Constraints::tight(size)` clamps a node to an exact size.
+- `Constraints::loosen()` preserves the max size but allows children to shrink.
+- `Constraints::unconstrained()` allows any size.
+
+The root node receives the surface size as a tight constraint when you call
+`App::render(surface_size)`. Parent containers pass loosened constraints to
+children so they can choose their intrinsic size within the parent's maximum.
+
+## Root Constraints
+
+Use `App::render_with_constraints` when you want to layout for a size that is
+different from the current surface. This is useful for offscreen measurement,
+previewing, or tests that need deterministic constraints.
+
+## Containers
+
+Hera Kit supports a small set of layout kinds:
+
+- **VStack** (`v_stack()`): vertical flow, summed heights + max width.
+- **HStack** (`h_stack()`): horizontal flow, summed widths + max height.
+- **ZStack** (`z_stack()`): overlays children at `(0, 0)` with max size.
+- **Grid** (`grid(columns)`): row-major layout with per-column and per-row
+  max sizes.
+- **Leaf** (`rectangle`, `text`, `image`, `surface_view`): leaf nodes with
+  intrinsic sizes.
+
+Use `.spacing(...)` to set stack spacing and `.grid_spacing(h, v)` for grids.
+
+Stack sizing follows simple rules: the main axis sums child sizes plus spacing,
+and the cross axis takes the maximum child size.
+
+## Alignment
+
+Alignment applies to `z_stack()` containers and controls where children are
+placed when they do not fill the stack's size.
+
+Available values:
+
+- `Alignment::TopLeading`
+- `Alignment::Top`
+- `Alignment::TopTrailing`
+- `Alignment::Leading`
+- `Alignment::Center`
+- `Alignment::Trailing`
+- `Alignment::BottomLeading`
+- `Alignment::Bottom`
+- `Alignment::BottomTrailing`
+
+## Positioning And Transforms
+
+Layout computes `position` values for every child. If you need to shift a node
+relative to layout results, prefer:
+
+- `.offset(x, y)` for translation
+- `.scale(x, y)` for scaling
+- `.rotation(degrees)` for rotation
+
+These modifiers do not affect layout size, only the rendered output.
+
+## Reuse And Stability
+
+Layout nodes are reused between renders whenever identity is stable. Use
+`.key(...)` on nodes that move or reorder to preserve their layout node ids and
+avoid reallocation in the AttributeGraph.
+
+## Example
+
+```rust
+use hera_kit::{Color, v_stack, h_stack, rectangle, text, Size};
+
+let card = v_stack()
+    .spacing(12.0)
+    .child(text("Status").single_line().font(0, 16.0))
+    .child(
+        h_stack()
+            .spacing(8.0)
+            .child(rectangle(Color::rgba(0.2, 0.6, 0.9, 1.0)).frame(24.0, 24.0))
+            .child(rectangle(Color::rgba(0.9, 0.9, 0.9, 1.0)).frame(120.0, 10.0)),
+    )
+    .frame(200.0, 120.0);
+```

@@ -1,0 +1,59 @@
+# React Native Host Introduction
+
+`rn_host` is a headless React Native host that targets Hera. It runs Hermes on a
+dedicated JS thread, enables Bridgeless + Fabric mode, and translates Fabric
+mount transactions into Hera scene graph diff ops. Input flows in the opposite
+direction: Hera input events are translated and dispatched into Fabric.
+
+## What rn_host Does
+
+- Connects to the Hera compositor via the Rust FFI client (`rn_host_ffi`).
+- Hosts Hermes and a Fabric runtime per surface.
+- Converts Fabric mount transactions into Hera protocol ops.
+- Provides text measurement and shaping via `hera_text_layout`.
+- Handles scrolling and input translation on the host side.
+
+## High-Level Flow
+
+1. `main.cpp` parses CLI args, connects to Hera, and creates a surface.
+2. `MainLoop` drives an event loop (Hera messages + mount queue).
+3. `ReactHost` boots Hermes and Fabric in Bridgeless mode.
+4. Fabric commits are translated to Hera ops and sent through the FFI layer.
+5. Hera frame scheduling ticks Fabric's event beat for smooth animations.
+
+## Where To Start In The Codebase
+
+- `react-native/rn_host/src/main.cpp`: program entrypoint and CLI parsing.
+- `react-native/rn_host/src/platform/core/main_loop.cpp`: main loop and event
+  pump that ties Hera to the Fabric mount queue.
+- `react-native/rn_host/src/fabric/adapter/adapter.cpp`: Fabric mutation
+  translation into Hera ops.
+- `react-native/rn_host/src/fabric/mounting/mount_observer.cpp`: mount
+  observation and transaction plumbing.
+- `react-native/rn_host/src/fabric/runtime/runtime.cpp`: Fabric scheduler,
+  surface handler, and event beat wiring.
+
+## Build And Run
+
+Build Hera first (to produce `librn_host_ffi.so`), then build `rn_host`:
+
+```bash
+podman run --rm -v "$PWD":/work hera-builder:latest bash -lc 'cd /work/ && ./build.sh'
+podman run --rm -v "$PWD":/work hera-builder:latest bash -lc 'cd /work/react-native && ./build_all.sh'
+```
+
+Run the integration test (Hera + rn_host):
+
+```bash
+podman run --rm -v "$PWD":/work hera-builder:latest bash -lc 'cd /work/system/bin && ./integration_test.sh'
+```
+
+## How To Extend rn_host
+
+Most integrations happen in three places:
+
+- **Mount translation**: map new Fabric props to Hera node properties.
+- **Platform services**: add native modules, timers, or services to Hermes.
+- **Input handling**: extend the input translator or scroll manager.
+
+See the components page for a detailed code map.

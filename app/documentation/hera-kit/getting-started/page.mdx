@@ -1,0 +1,78 @@
+# Getting Started
+
+This guide walks through the smallest loop for building a Hera Kit view and
+producing `DiffOp`s you can send to the Hera server.
+
+## Add The Crate
+
+Inside this monorepo, add a path dependency on `hera-kit`:
+
+```toml
+[dependencies]
+hera-kit = { path = "../crates/kit" }
+```
+
+The crate name is `hera-kit`, so the Rust import path is `hera_kit`.
+
+## Define A View
+
+Create a view struct that implements `View` and builds a `UiNode` tree using
+the DSL:
+
+```rust
+use hera_kit::{Color, Environment, Runtime, UiNode, View, h_stack, rectangle, text};
+
+struct StatusRow;
+
+impl View for StatusRow {
+    fn build(&self, rt: &mut Runtime, env: &mut Environment) -> UiNode {
+        h_stack()
+            .spacing(8.0)
+            .child(rectangle(Color::rgba(0.2, 0.6, 0.9, 1.0)).frame(12.0, 12.0))
+            .child(text("Connected").single_line().font(0, 14.0))
+            .build(rt, env)
+    }
+}
+```
+
+## Render To Diffs
+
+`App` owns the runtime, environment, layout system, and reconciler. Calling
+`render` produces the list of `DiffOp`s for the Hera server.
+
+```rust
+use hera_kit::{App, ForegroundColor, Paint, Size};
+
+let mut app = App::new(|_rt, _layout| StatusRow);
+app.set_env::<ForegroundColor>(Paint::from(Color::rgba(1.0, 1.0, 1.0, 1.0)));
+
+let surface = Size::new(800.0, 480.0);
+let diffs = app.render(surface);
+```
+
+Call `render` again whenever state changes; the reconciler will generate
+incremental updates instead of a full tree.
+
+## Send Diffs To Hera
+
+Hera Kit returns protocol `DiffOp`s directly. To present them on screen, send
+them over your client transport to the compositor. Use `hera-protocol` types
+for serialization and FD passing, or integrate with your existing IPC layer.
+
+## A Minimal Render Loop
+
+In a real client, you render on state changes or on a frame tick:
+
+```rust
+let surface = Size::new(800.0, 480.0);
+
+// In your app loop:
+let diffs = app.render(surface);
+client.commit(surface_id, diffs);
+```
+
+## Next Steps
+
+- Dive into the Layout guide to understand intrinsic sizing and constraints.
+- Use `State<T>` and derived attributes to build reactive components.
+- For React Native, see the `rn_host` documentation and integration pipeline.

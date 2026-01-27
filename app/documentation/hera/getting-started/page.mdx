@@ -1,0 +1,63 @@
+# Getting Started
+
+This guide covers the fastest path to building Hera and validating the stack
+end-to-end. It assumes you are running from the monorepo root.
+
+## Prerequisites
+
+- `podman` (the build steps run inside the `hera-builder` container).
+- The `hera-builder:latest` image. Build it once with:
+
+```bash
+podman build -f Dockerfile -t hera-builder:latest .
+```
+
+If you prefer a single shortcut that builds the image and Hera in one go, use:
+
+```bash
+./start_hera_builder.sh build_hera
+```
+
+## Build Hera
+
+Hera is built inside the `hera-builder` container:
+
+```bash
+podman run --rm -v "$PWD":/work hera-builder:latest bash -lc 'cd /work/ && ./build.sh'
+```
+
+This produces the core server binaries and the Rust client libraries.
+Build outputs are copied into `system/bin` as part of the script.
+If you already ran `./start_hera_builder.sh build_hera`, you can skip this step.
+
+## Build The React Native Host (Optional)
+
+If you plan to run React Native apps on Hera, build `rn_host` after Hera:
+
+```bash
+podman run --rm -v "$PWD":/work hera-builder:latest bash -lc 'cd /work/react-native && ./build_all.sh'
+```
+
+This step depends on the Hera build because it links against `librn_host_ffi.so`.
+
+## Run The Integration Test
+
+The integration test validates the `rn_host` to Hera link and catches
+segmentation faults early:
+
+```bash
+podman run --rm -v "$PWD":/work hera-builder:latest bash -lc 'cd /work/system/bin && ./integration_test.sh'
+```
+
+## Explore The Documentation
+
+- Read the Architecture page for the end-to-end system flow.
+- Use the Protocol page when building a custom client.
+- Jump into Hera Kit docs for Rust-native UI work.
+- Read the React Native host docs for Fabric integration.
+
+## Common Issues
+
+- **Missing build outputs**: confirm the builder image exists and is up to date.
+- **rn_host build errors**: ensure Hera was built first so the FFI library exists.
+- **Integration test failures**: re-run with a clean workspace to confirm.

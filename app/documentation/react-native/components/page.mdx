@@ -1,0 +1,65 @@
+# Components
+
+This page summarizes the main moving pieces inside `rn_host` and how they fit
+together. For deep dives, see `react-native/rn_host/docs/ARCHITECTURE.md`.
+
+## Core Runtime Pieces
+
+- **Entrypoint** (`react-native/rn_host/src/main.cpp`): parses CLI flags,
+  connects to Hera, creates a surface, and starts `MainLoop`.
+- **MainLoop** (`react-native/rn_host/src/platform/core/main_loop.*`): owns the
+  Hera event loop, mount dispatcher, and surface controller.
+- **SurfaceSession**: per-surface bundle of `ReactHost`, mount queue, and
+  scroll manager, tracked by `SessionRegistry`.
+- **HeraClient** (`react-native/rn_host/src/platform/client/hera_client.*`):
+  C++ wrapper around the Rust FFI client for IPC with the compositor.
+
+## React Native Runtime
+
+- **ReactHost** (`react-native/rn_host/src/runtime/instance/react_host.*`):
+  boots Hermes, installs Bridgeless runtime bindings, and hosts Fabric.
+- **FabricRuntime** (`react-native/rn_host/src/fabric/runtime/runtime.*`):
+  owns Scheduler, SurfaceHandler, EventDispatcher, and PointerEventsProcessor.
+- **JsThread / HermesEngine** (`react-native/rn_host/src/runtime/jsi/*`):
+  dedicated JS thread and Hermes runtime lifecycle.
+
+## Mount Pipeline (Fabric -> Hera)
+
+1. `FabricMountObserver` receives a `MountingTransaction`.
+2. `adapter::translate_mutations` maps RN mutations into `rn_host::Mutation`
+   entries, including text shaping and view props.
+3. `MountTransactionSink` converts mutations into `HeraOp` commands and sends
+   them via `HeraClient::commit`.
+4. `MainLoop` drains the mount queue and ensures scroll updates are applied
+   before commits.
+
+## Input And Scrolling
+
+- Input events from Hera are translated into `input::InputEvent` and dispatched
+  to Fabric via `FabricRuntime::handle_input`.
+- The scroll manager (`react-native/rn_host/src/platform/scroll/*`) maintains a
+  scroll tree and emits offset mutations plus scroll events back to JS.
+
+## Text Measurement And Shaping
+
+`HeraTextLayoutManager` implements Fabric text measurement using
+`hera_text_layout` (FFI). The adapter converts text props into glyph runs so the
+server can rasterize and cache glyphs.
+
+## Threading And Scheduling
+
+- **Main thread**: event loop, Hera polling, mount draining.
+- **JS thread**: Hermes runtime and JS task queue.
+- **Timer worker**: host timers post tasks back onto the JS thread.
+
+Frame scheduling from Hera drives Fabric's event beat so animation timing stays
+aligned with the compositor frame clock.
+
+## Key File Map
+
+- `react-native/rn_host/src/platform/core/*`: MainLoop and event loop wiring.
+- `react-native/rn_host/src/platform/session/*`: surface sessions and routing.
+- `react-native/rn_host/src/fabric/*`: Fabric runtime, adapter, mount observer.
+- `react-native/rn_host/src/fabric/mounting/*`: mount sink and transaction flow.
+- `react-native/rn_host/src/platform/scroll/*`: scroll state and input control.
+- `react-native/rn_host/src/runtime/*`: Hermes runtime and Bridgeless install.

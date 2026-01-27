@@ -1,0 +1,102 @@
+# Architecture
+
+Hera is a server-rendered display stack. Clients describe **what** should be on
+screen (nodes, glyph runs, buffers), and the server decides **when** and **how**
+to draw it. This keeps animation, composition, and presentation tightly aligned
+with the display clock, even when client processes are busy.
+
+By pushing semantic information (nodes, transforms, materials, and text runs)
+down to the compositor and renderer, Hera can run advanced rendering and
+animation that spans client surfaces. This enables cross-surface composition,
+shared effects, and consistent timing that would be hard to coordinate in
+separate client renderers.
+
+```
+Client (Hera Kit / RN host / custom app)
+  |  DiffOps + glyph runs + DMA-BUFs
+  v
+hera::server  (IPC, input, frame timing)
+  v
+hera::compositor  (frame loop, animation, hit-testing)
+  v
+hera::graph  (retained scene graph, surfaces)
+  v
+hera::renderer  (Vulkan, atlases, KMS pageflip)
+  v
+DRM/KMS scanout
+```
+
+## Process Boundaries And Transport
+
+- **Clients** run unprivileged. They send scene graph diffs and optional shared
+  buffers (DMA-BUF) through `hera::protocol` over Unix domain sockets.
+- **Server** is privileged. It owns input devices, display access, and the
+  frame clock, and is the only process allowed to render and present frames.
+- **Transport** supports FD passing so video or GPU-produced buffers can be
+  shared without copies.
+
+## Responsibilities At A Glance
+
+- **Client**: build the UI tree, shape text, import buffers, and emit `DiffOp`
+  commits when state changes.
+- **Server**: apply diffs into the retained graph, schedule animation, perform
+  hit-testing, composite, and present via DRM/KMS.
+
+## Frame Lifecycle
+
+1. The client builds a `UiNode` tree (or Fabric tree) and emits `DiffOp`s.
+2. `hera::server` receives diffs, normalizes them, and schedules work.
+3. `hera::compositor` merges diffs into the retained graph, updates animation,
+   and computes damage and hit-testing.
+4. `hera::renderer` records Vulkan work, binds glyph atlases and textures, and
+   presents via DRM/KMS page flips.
+
+## Surface Lifecycle
+
+1. The client sends `CreateSurface`.
+2. The server replies with `SurfaceCreated`, providing a `SurfaceId`.
+3. The client commits `DiffOp`s with `SetRoot` to establish the tree.
+4. The server can send `SurfaceChanged` when surface size changes.
+5. The client eventually sends `DestroySurface`.
+
+## Scene Graph Model
+
+The retained graph is the authoritative description of the UI:
+
+- **Nodes**: views, images, text runs, and embedded surfaces.
+- **Properties**: geometry, opacity, transforms, clip/mask, filters, z-order.
+- **Surfaces**: per-client roots, with optional subsurfaces for composition.
+
+Diffs are composable: clients can update subsets of the tree without sending a
+full frame, and the compositor merges updates from multiple clients into a
+single graph.
+
+## Timing And Animation
+
+Animations are driven by the server frame loop. Clients can request animated
+property changes, but interpolation runs inside `hera::compositor` so timing is
+stable even if a client stalls. Frame callbacks allow clients to align updates
+with the compositor cadence when needed.
+
+## Input Flow
+
+Input devices are handled on the server. After hit-testing, input events are
+sent back to the owning client with an optional `NodeId` so clients can route
+events to the right view.
+
+## Text Pipeline
+
+Text is shaped on the client (glyph IDs and positions) and rasterized on the
+server into shared glyph atlases. This keeps text caches centralized and makes
+effects like blur, transforms, and animation cheap to apply.
+
+## Zero-Copy Buffers
+
+For rich content (video, WebView, custom GPU rendering), clients can share
+DMA-BUFs directly with the server. The renderer composites them alongside the
+scene graph without extra copies.
+
+## Next Steps
+
+Read the Hera Kit documentation to see how a Rust UI tree becomes `DiffOp`s,
+or explore the React Native host docs to understand Fabric integration.

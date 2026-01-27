@@ -1,0 +1,111 @@
+# Components
+
+Hera Kit exposes a small, composable set of primitives and a fluent DSL. Each
+builder returns a `NodeBuilder` that you can chain with modifiers before
+calling `.build(rt, env)` or embedding it as a child.
+
+## Layout Containers
+
+- `v_stack()` and `h_stack()` arrange children along a single axis.
+- `z_stack()` overlays children in order.
+- `spacer()` inserts flexible space in vertical and horizontal stacks.
+- `grid(columns)` lays out children in row-major order.
+- `grid_row()` groups children for `grid(...)` when you want to build rows
+  incrementally.
+
+Spacing is controlled with `.spacing(...)` on stacks and `.grid_spacing(h, v)`
+on grids.
+
+Alignment is controlled with `.alignment(...)` for `z_stack`s, with the default being centered.
+
+## Primitive Nodes
+
+- `view(color)` creates a view node with a solid fill.
+- `text(...)` creates a text view with shaping derived attributes.
+- `image(name)` creates an image node keyed by name; call `.image_size(...)`
+  and `.image_buffer(...)` to attach actual pixels.
+- `image_buffer(buffer_id, width, height)` creates a buffer-backed image node.
+- `surface_view(surface_id)` creates a view hosting another Hera surface.
+
+## Modifiers
+
+### Layout And Visibility
+
+- `.frame(width, height)` sets the intrinsic size used by layout.
+- `.position(x, y)` sets the node position within its parent.
+- `.z_index(value)` adjusts ordering for overlapping nodes.
+- `.opacity(value)` and `.visible(bool)` control visibility.
+
+### Input
+
+- `.hit(kind)` configures hit-testing behavior.
+- `.tap(handler)` handles a tap gesture.
+- `.tap_down(handler)` handles pointer down for taps.
+- `.tap_up(handler)` handles pointer up for taps.
+- `.pointer(handler)` handles pointer events with position data.
+- `.pointer_down(handler)` handles pointer down events.
+- `.pointer_up(handler)` handles pointer up events.
+
+### Transform And Geometry
+
+- `.offset(x, y)` adds a translation to the node.
+- `.scale(x, y)` scales the node around its origin.
+- `.rotation(degrees)` rotates the node in 2D.
+
+### Effects
+
+- `.shadow(color, x, y, spread)` adds a drop shadow.
+- `.blur(radius)` applies a gaussian blur.
+- `.filter(filter)` applies a compositor filter.
+- `.mask(mask)` applies a mask for clipping/alpha.
+- `.clip(rect)` clips rendering to a rounded rectangle.
+
+### Paint And Borders
+
+- `.fill(paint)` changes the fill for views, text, or images.
+- `.radius(value)` applies a corner radius to view nodes.
+- `.border(width, color)` adds an outline to view nodes.
+
+### Children
+
+- `.child(...)` and `.children(...)` add children to containers.
+- `.maybe_child(...)` conditionally adds a child.
+- `.grid_row(...)` expands a row builder into a grid.
+
+### Identity And Diffing
+
+- `.key(...)` assigns a stable identity when items reorder.
+- Keeping stable keys helps the reconciler reuse layout nodes and avoids
+  deleting and re-adding subtrees.
+
+## Text View Details
+
+`text("Hello")` returns a `Text` view with methods to control shaping:
+
+- `.font(font_key, size)` selects font parameters.
+- `.single_line()` and `.multi_line()` choose shaping mode.
+- `.max_width(width)` sets line wrapping constraints.
+- `.text_attr(rt)` returns the underlying string attribute for reactive updates.
+
+Text color is pulled from the environment via `ForegroundColor`, so you can
+theme text globally with `app.set_env::<ForegroundColor>(paint)`.
+
+## Example: Composed Layout
+
+```rust
+use hera_kit::{Color, Filter, v_stack, h_stack, view, text};
+
+let card = v_stack()
+    .spacing(12.0)
+    .child(text("Now Playing").single_line().font(0, 18.0))
+    .child(
+        h_stack()
+            .spacing(8.0)
+            .child(view(Color::rgba(0.2, 0.6, 0.9, 1.0)).frame(48.0, 48.0))
+            .child(view(Color::rgba(0.9, 0.9, 0.9, 1.0)).frame(200.0, 12.0))
+            .blur(2.0)
+            .filter(Filter::Blur(2.0)),
+    )
+    .radius(12.0)
+    .shadow(Color::rgba(0.0, 0.0, 0.0, 0.2), 0.0, 8.0, 16.0);
+```

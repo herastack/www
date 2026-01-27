@@ -1,0 +1,107 @@
+# Hera Kit Introduction
+
+Hera Kit is the native UI toolkit in part modelled after Swift UI and React Native.
+
+Hera Kit conists of a reactive graph for state, a constraint-based layout system and a comprehensive DSL for building application view trees.
+
+## When To Use Hera Kit
+
+- You are building core platform applications that need to be highly performant.
+- You are building core system UI.
+- You are building a Surface-aware application (window manager, lock screen, etc).
+
+## What Hera Kit Provides
+
+- A reactive **AttributeGraph** (`Runtime`, `State`, `Eval`) for state and
+  derived values.
+- A minimal **layout system** (`LayoutSystem`, `Constraints`) that handles
+  stacks, grids, and intrinsic sizing.
+- A **View** abstraction (`View`, `UiNode`) with a fluent builder DSL.
+- A **Reconciler** that diffs successive trees into protocol `DiffOp`s.
+- An **input routing system** that facilitates hit-testing and event dispatch.
+- A **text system** backed by `hera_text` for shaping / layout.
+
+## Core Building Blocks
+
+### Reactive Runtime
+
+State lives in the AttributeGraph, and derived values recompute automatically
+when dependencies change. The runtime batches updates so you can make multiple
+changes before recomputing the graph.
+
+Key types:
+
+- `State<T>`: strongly typed handle for state attributes.
+- `Runtime`: owns the graph and derived compute closures.
+- `Eval`: read dependencies inside derived closures.
+
+### Views And Nodes
+
+Views are Rust types that implement `View` and build a `UiNode` tree. Nodes are
+lightweight, purely declarative descriptions of what the server should render.
+When you call `App::render`, Hera Kit runs layout and produces diffs.
+
+### Environment
+
+Environment values are typed keys backed by graph attributes. This allows
+global data (like default text color) to flow through the tree without manual
+prop drilling.
+
+### Diffing And Animation
+
+`Reconciler` compares the previous tree to the new tree, assigns stable
+`NodeId`s, and produces `DiffOp`s. You can opt into animated patches by
+setting a default interpolation on the `App`.
+
+## Where To Start In The Codebase
+
+- `crates/kit/src/app.rs`: `App` orchestration and render entrypoints.
+- `crates/kit/src/view.rs`: core `View` trait and node building.
+- `crates/kit/src/layout.rs`: layout graph, constraints, and sizing.
+- `crates/kit/src/reconcile.rs`: diffing and `DiffOp` generation.
+
+## Example: Hello World
+
+```rust
+use hera_kit::{
+    text, v_stack, view, App, Color, Environment, Runtime, Size, UiNode, View,
+};
+
+struct HelloView;
+
+impl View for HelloView {
+    fn build(&self, rt: &mut Runtime, env: &mut Environment) -> UiNode {
+        v_stack()
+            .spacing(8.0)
+            .child(
+                text("Hello, Hera!")
+                    .single_line()
+                    .font(0, 18.0),
+            )
+            .child(
+                view(Color::rgba(0.20, 0.45, 0.95, 1.0))
+                    .frame(120.0, 6.0),
+            )
+            .build(rt, env)
+    }
+}
+
+let mut app = App::new(|_rt, _layout| HelloView);
+let diffs = app.render(Size::new(200.0, 60.0));
+```
+
+## Rendering Cycle
+
+1. `App::render` builds a new `UiNode` tree from your `View`.
+2. Layout nodes are synchronized and constraints are applied.
+3. The reconciler diffs the new tree against the previous tree.
+4. A list of `DiffOp`s is returned for the Hera server to apply.
+
+Use `App::render_with_constraints` when you need explicit root constraints
+(for example, for offscreen layout or testing).
+
+## Tips
+
+- Use `.key(...)` on nodes that need stable identity across reorders.
+- Keep derived attributes small; they re-evaluate when dependencies change.
+- Use `Text::text_attr` for reactive text updates instead of rebuilding nodes.

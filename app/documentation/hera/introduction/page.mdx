@@ -1,0 +1,60 @@
+# Overview
+
+Hera is a compositor and render server for Embedded Linux, written in Rust. The server
+draws everything: clients send scene graph diffs, glyph runs, and shared buffers,
+while the compositor renders, composites, and presents via DRM/KMS with a Vulkan backend.
+
+## What Hera Is
+
+Hera is not a UI toolkit by itself. It is the server-side engine that receives
+high-level UI changes and turns them into frames. Client toolkits (Hera Kit,
+React Native via `rn_host`, or other custom apps) focus on building a scene
+graph and emitting diffs; the server owns timing, composition, and GPU work.
+
+## Why A Server-Rendered Compositor
+
+- Hera carries semantic scene data down to the compositor and renderer, unlocking
+  advanced rendering and animation that can span multiple client surfaces.
+- The server owns frame timing and animation so updates stay aligned with the
+  display clock even if clients stall.
+- Multiple client processes can contribute surfaces without each client
+  managing KMS/DRM devices.
+- Rendering is centralized, enabling consistent effects and a single GPU cache
+  for glyphs, images, and shared buffers.
+
+## Core Building Blocks
+
+- `hera::server` handles IPC, input, lifecycle, and frame timing.
+- `hera::compositor` schedules frames, applies animation, and computes damage.
+- `hera::graph` holds the retained scene graph and per-surface roots.
+- `hera::renderer` records Vulkan work, manages buffers/atlases, and presents.
+- `hera::protocol` defines the wire types and transport helpers.
+
+## Data Flow At A Glance
+
+1. A client builds a UI tree and diffs it into protocol `DiffOp` messages.
+2. Diffs, glyph runs, and shared buffers flow over Unix sockets to the server.
+3. The compositor merges updates into the retained scene graph and runs
+   animation and hit-testing on the server clock.
+4. The renderer builds command buffers, imports DMA-BUFs, and page-flips.
+
+## Key Concepts
+
+- **Surface**: a per-client root with its own scene graph tree.
+- **Node**: a render primitive (view, text run, image, embedded surface).
+- **DiffOp**: an incremental update to the retained graph.
+- **Commit**: a batch of diffs applied atomically and acknowledged by the
+  server.
+- **Frame Scheduling**: server-driven timing that aligns client updates with
+  presentation.
+
+## Client Entry Points
+
+- **Hera Kit**: a Rust-native UI runtime that emits diffs directly.
+- **React Native host**: a Bridgeless + Fabric host that translates RN mount
+  transactions into Hera diff ops.
+
+## Where To Go Next
+
+Start with the architecture page for the full system flow, then dive into
+Hera Kit or the React Native host depending on how you plan to build your UI.

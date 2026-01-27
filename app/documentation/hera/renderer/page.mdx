@@ -1,0 +1,105 @@
+# Renderer
+
+Hera renders every frame on the server using a Vulkan backend. The renderer
+consumes the retained scene graph, builds GPU work, and presents the final
+image through DRM/KMS. It is designed to keep presentation timing stable and
+to share GPU resources (glyph atlases, textures, buffers) across clients.
+
+## Capabilities
+
+- Scene graph rendering for views, images, text runs, and embedded surfaces.
+- Solid fills, gradients, borders, opacity, transforms, clipping, and shadows.
+- Backdrop and content blur via dedicated render passes.
+- Text shaping on the client with server-side glyph atlas caching.
+- DMA-BUF import for zero-copy external images and scanout paths.
+- Render graph orchestration for multi-pass composition and blur chains.
+- Instanced drawing for rectangles, shadows, glyphs, and image quads.
+
+## Renderer Pipeline
+
+1. The compositor produces a `SceneSnapshot` of the retained graph.
+2. The scene renderer builds draw lists and resolves materials.
+3. A render graph encodes passes and attachments into Vulkan commands.
+4. The swapchain acquires a render target, renders into it, and presents.
+5. DRM/KMS pageflips complete and emit out-fence or flip events.
+
+## Render Graph
+
+The renderer builds a small render graph per frame. It describes the
+attachments, pass ordering, and resource transitions needed to compose the
+scene. This makes multi-pass effects like backdrop blur explicit and avoids
+manual command buffer wiring in the scene layer.
+
+Key properties:
+
+- **Explicit dependencies**: the graph encodes read/write usage between passes.
+- **Transient attachments**: temporary images are allocated for blur ping/pong
+  passes and released after the frame.
+- **Pass-level batching**: draw items are grouped by material/pipeline inside
+  each render pass to minimize state changes.
+
+## Dynamic Rendering
+
+The Vulkan backend records render passes using dynamic rendering so it can
+build pass descriptions on the fly without pre-baked render pass objects. This
+is especially useful for blur chains and offscreen passes whose attachments
+vary by frame.
+
+## Instanced Drawing
+
+Most primitives are emitted as instances rather than individual draw calls.
+Rectangle fills, rounded rects, shadows, glyphs, and image quads are grouped
+into instance buffers and rendered with a small set of pipelines. This keeps
+draw call counts low and makes per-frame CPU work predictable.
+
+## Caching And Resource Reuse
+
+- **Glyph atlases** are cached and reused across frames to avoid re-rasterizing
+  or re-uploading text.
+- **Image bindings** are cached per buffer and updated only when content
+  changes or layout transitions require it.
+- **Pipeline objects** are created once and reused, with per-frame descriptors
+  bound at draw time.
+
+## Presentation Modes
+
+Hera supports two presentation paths, selected by the runtime:
+
+- **Zero-Copy**: render targets are exportable and passed directly to KMS.
+- **CPU-Copy**: the GPU renders into a texture, then writes into scanout
+  buffers when zero-copy is not supported.
+
+Both paths use explicit fences so the renderer can synchronize GPU completion
+with KMS page flips.
+The CPU-copy path is also used for Qemu Lavapipe, which makes it easier to
+test Hera on macOS without native Vulkan.
+
+## Buffer Import And External Images
+
+Clients can provide images via `ImportBuffer` with DMA-BUF descriptors. The
+renderer realizes those buffers as Vulkan images, tracks their layouts, and
+binds them alongside internal textures (glyph atlases, gradient tables, and
+image caches).
+
+## Synchronization And Timing
+
+The Vulkan backend uses timeline semaphores to sequence work. The display
+backend reports KMS out-fences where supported; otherwise, pageflip events are
+polled and used to retire in-flight frames.
+
+## Performance Notes
+
+- The scene renderer batches draw items per pass and uses instance buffers to
+  reduce command buffer overhead.
+- Transient resources for blur and composite passes are pooled per device to
+  avoid per-frame allocations.
+- The swapchain tracks in-flight frames and fences so the renderer can
+  maximize GPU occupancy without over-committing display buffers.
+
+## Code Map
+
+- `crates/renderer/src/runtime/vulkan.rs`: runtime wiring and configuration.
+- `crates/renderer/src/gpu/vulkan.rs`: Vulkan backend implementation.
+- `crates/renderer/src/scene/renderer.rs`: draw list, materials, and encoding.
+- `crates/renderer/src/swapchain/*`: image lifecycle and presentation state.
+- `crates/renderer/src/display/drm.rs`: DRM/KMS surface and scanout buffers.
